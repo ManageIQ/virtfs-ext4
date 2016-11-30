@@ -1,12 +1,7 @@
-require 'fs/ext4/directory_entry'
-require 'fs/ext4/extent'
-require 'fs/ext4/extent_header'
-require 'fs/ext4/extent_index'
-
 require 'binary_struct'
 require 'memory_buffer'
 
-module Ext4
+module VirtFS::Ext4
   # ////////////////////////////////////////////////////////////////////////////
   # // Data definitions.
 
@@ -138,13 +133,13 @@ module Ext4
 
     # Lookup table for File Mode to File Type.
     @@FM2FT = {
-      Inode::FM_FIFO      => DirectoryEntry::FT_FIFO,
-      Inode::FM_CHAR      => DirectoryEntry::FT_CHAR,
-      Inode::FM_DIRECTORY => DirectoryEntry::FT_DIRECTORY,
-      Inode::FM_BLOCK_DEV => DirectoryEntry::FT_BLOCK,
-      Inode::FM_FILE      => DirectoryEntry::FT_FILE,
-      Inode::FM_SYM_LNK   => DirectoryEntry::FT_SYM_LNK,
-      Inode::FM_SOCKET    => DirectoryEntry::FT_SOCKET
+      Inode::FM_FIFO      => VirtFS::Ext3::DirectoryEntry::FT_FIFO,
+      Inode::FM_CHAR      => VirtFS::Ext3::DirectoryEntry::FT_CHAR,
+      Inode::FM_DIRECTORY => VirtFS::Ext3::DirectoryEntry::FT_DIRECTORY,
+      Inode::FM_BLOCK_DEV => VirtFS::Ext3::DirectoryEntry::FT_BLOCK,
+      Inode::FM_FILE      => VirtFS::Ext3::DirectoryEntry::FT_FILE,
+      Inode::FM_SYM_LNK   => VirtFS::Ext3::DirectoryEntry::FT_SYM_LNK,
+      Inode::FM_SOCKET    => VirtFS::Ext3::DirectoryEntry::FT_SOCKET
     }
 
     attr_reader :mode, :flags, :symlnk, :pos
@@ -158,10 +153,10 @@ module Ext4
       @mode  = @in['file_mode']
       @flags = @in['flags']
 
-      if self.isSymLink? && length < SYM_LNK_SIZE
+      if self.symlink? && length < SYM_LNK_SIZE
         @data_method = nil
         @symlnk = @in['data']
-      elsif hasExtents?
+      elsif extents?
         @data_method = :extents
       else
         @data_method = :indirect
@@ -182,7 +177,7 @@ module Ext4
              when IO::SEEK_CUR then @pos + offset
              when IO::SEEK_END then length - offset
              end
-      @pos = 0           if @pos < 0
+      @pos = 0      if @pos < 0
       @pos = length if @pos > length
       @pos
     end
@@ -229,43 +224,43 @@ module Ext4
       @length ||= (@in['size_hi'] << 32) | @in['size_lo']
     end
 
-    def isDir?
-      modeSet?(FM_DIRECTORY)
+    def dir?
+      mode?(FM_DIRECTORY)
     end
 
-    def isFile?
-      modeSet?(FM_FILE)
+    def file?
+      mode?(FM_FILE)
     end
 
-    def isDev?
+    def dev?
       (@mode & MSK_IS_DEV) > 0
     end
 
-    def isSymLink?
-      modeSet?(FM_SYM_LNK)
+    def symlink?
+      mode?(FM_SYM_LNK)
     end
 
-    def isHashedDir?
-      isDir? && flagSet?(IF_HASH_INDEX)
+    def hashed_dir?
+      dir? && flag?(IF_HASH_INDEX)
     end
 
-    def hasExtents?
-      flagSet?(IF_EXTENTS)
+    def extents?
+      flag?(IF_EXTENTS)
     end
 
-    def aTime
+    def atime
       @atime ||= Time.at(@in['atime'])
     end
 
-    def cTime
+    def ctime
       @ctime ||= Time.at(@in['ctime'])
     end
 
-    def mTime
+    def mtime
       @mtime ||= Time.at(@in['mtime'])
     end
 
-    def dTime
+    def dtime
       @dtime ||= Time.at(@in['dtime'])
     end
 
@@ -273,86 +268,60 @@ module Ext4
       @permissions ||= @in['file_mode'] & (MSK_PERM_OWNER | MSK_PERM_GROUP | MSK_PERM_USER)
     end
 
-    def ownerPermissions
+    def owner_permissions
       @owner_permissions ||= @in['file_mode'] & MSK_PERM_OWNER
     end
 
-    def groupPermissions
+    def group_permissions
       @group_permissions ||= @in['file_mode'] & MSK_PERM_GROUP
     end
 
-    def userPermissions
+    def user_permissions
       @user_permissions ||= @in['file_mode'] & MSK_PERM_USER
     end
 
     # ////////////////////////////////////////////////////////////////////////////
     # // Utility functions.
 
-    def fileModeToFileType
+    def file_mode_file_type
       @@FM2FT[@mode & MSK_FILE_MODE]
     end
 
-    def modeSet?(bit)
+    def mode?(bit)
       (@mode & bit) == bit
     end
 
-    def flagSet?(bit)
+    def flag?(bit)
       (@flags & bit) == bit
     end
 
     def flags_to_s
       str_flags = []
       FLAG_STR.each_key do |flag|
-        str_flags << FLAG_STR[flag] if flagSet?(flag)
+        str_flags << FLAG_STR[flag] if flag?(flag)
       end
       str_flags.join(' ')
-    end
-
-    def dump
-      out = "\#<#{self.class}:0x#{'%08x' % object_id}>\n"
-      out += "Inode Number : #{@inum}\n"
-      out += "File mode    : 0x#{'%04x' % @in['file_mode']}\n"
-      out += "UID          : #{uid}\n"
-      out += "Size         : #{length}\n"
-      out += "ATime        : #{aTime}\n"
-      out += "CTime        : #{cTime}\n"
-      out += "MTime        : #{mTime}\n"
-      out += "DTime        : #{dTime}\n"
-      out += "GID          : #{gid}\n"
-      out += "Link count   : #{@in['link_count']}\n"
-      out += "Block count  : #{nblocks}\n"
-      out += "Flags        : #{flags_to_s}\n"
-      extra = @flags - (@flags & IF_FLAGS)
-      out << "  Extra Flags: 0x#{'%08x' % extra}\n" if extra != 0
-      out += "Version      : #{@in['version']}\n"
-      out += "Data         : \n#{@in['data'].hex_dump}"
-      out += "Generation   : 0x#{'%08x' % @in['gen_num']}\n"
-      out += "Ext attrib   : 0x#{'%08x' % @in['ext_attrib']}\n"
-      out += "Frag blk adrs: 0x#{'%08x' % @in['frag_blk']}\n"
-      out += "Frag index   : 0x#{'%02x' % @in['frag_idx']}\n"
-      out += "Frag size    : 0x#{'%02x' % @in['frag_siz']}\n"
-      out
     end
 
     private
 
     # NB: pos is 0-based, while len is 1-based
     def pos_to_block(pos, len)
-      startBlock, startByte = pos.divmod(@sb.blockSize)
-      endBlock, endByte = (pos + len - 1).divmod(@sb.blockSize)
+      startBlock, startByte = pos.divmod(@sb.block_size)
+      endBlock, endByte = (pos + len - 1).divmod(@sb.block_size)
       nblocks = endBlock - startBlock + 1
       return startBlock, startByte, endBlock, endByte, nblocks
     end
 
     def read_blocks(startBlock, nblocks = 1)
-      out = MemoryBuffer.create(nblocks * @sb.blockSize)
+      out = MemoryBuffer.create(nblocks * @sb.block_size)
       raise "Ext4::Inode.read_blocks: startBlock=<#{startBlock}> is greater than #{data_block_pointers.length}" if startBlock > data_block_pointers.length - 1
       1.upto(nblocks) do |i|
         block_index = startBlock + i - 1
         raise "Ext4::Inode.read_blocks: blockIndex=<#{block_index}> is greater than #{data_block_pointers.length}" if block_index > data_block_pointers.length - 1
         block = data_block_pointers[block_index]
-        data  = @sb.getBlock(block)
-        out[(i - 1) * @sb.blockSize, @sb.blockSize] = data
+        data  = @sb.get_block(block)
+        out[(i - 1) * @sb.block_size, @sb.block_size] = data
       end
       out
     end
@@ -367,7 +336,7 @@ module Ext4
 
     def expected_blocks
       @expected_blocks ||= begin
-        quotient, remainder = length.divmod(@sb.blockSize)
+        quotient, remainder = length.divmod(@sb.block_size)
         quotient + ((remainder > 0) ? 1 : 0)
       end
     end

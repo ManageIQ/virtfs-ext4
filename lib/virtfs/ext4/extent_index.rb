@@ -1,6 +1,6 @@
 require 'binary_struct'
 
-module Ext4
+module VirtFS::Ext4
   # ////////////////////////////////////////////////////////////////////////////
   # // Data definitions.
 
@@ -21,13 +21,6 @@ module Ext4
 
       @block      = @ei['block']
       @leaf       = (@ei['leaf_hi'] << 32) | @ei['leaf_lo']
-    end
-
-    def dump
-      out = "\#<#{self.class}:0x#{'%08x' % object_id}>\n"
-      out += "Block        : #{@block}\n"
-      out += "Leaf         : #{@leaf}\n"
-      out
     end
   end
 end

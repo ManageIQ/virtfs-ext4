@@ -7,6 +7,7 @@ require 'binary_struct'
 require 'util/miq-uuid'
 require 'stringio'
 require 'memory_buffer'
+require 'uuidtools'
 
 require 'rufus/lru'
 
@@ -183,9 +184,9 @@ module Ext4
       @sb['last_mnt_path'].delete!("\000")
       @numGroups, @lastGroupBlocks = @sb['num_blocks'].divmod(@sb['blocks_in_group'])
       @numGroups += 1 if @lastGroupBlocks > 0
-      @fsId = MiqUUID.parse_raw(@sb['fs_id'])
+      @fsId = UUIDTools::UUID.parse_raw(@sb['fs_id'])
       @volName = @sb['vol_name']
-      @jrnlId = MiqUUID.parse_raw(@sb['jrnl_id'])
+      @jrnlId = UUIDTools::UUID.parse_raw(@sb['jrnl_id'])
     end
 
     # ////////////////////////////////////////////////////////////////////////////
@@ -228,7 +229,7 @@ module Ext4
     end
 
     def groupDescriptorSize
-      @groupDescriptorSize ||= is_enabled_64_bit? ? @sb['group_desc_size'] : GDE_SIZE 
+      @groupDescriptorSize ||= is_enabled_64_bit? ? @sb['group_desc_size'] : GDE_SIZE
     end
 
     def freeBytes
